@@ -1,6 +1,5 @@
 package org.vinni.servidor.gui;
 
-
 import javax.swing.*;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -9,25 +8,25 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Author: Vinni
  */
 public class PrincipalSrv extends javax.swing.JFrame {
+
     private final int PORT = 12345;
     private ServerSocket serverSocket;
-    private Socket clientSocket;
-    private BufferedReader in;
-    private PrintWriter out;
 
-    /**
-     * Creates new form Principal1
-     */
+    // Lista de writers de todos los clientes conectados
+    private final List<PrintWriter> clientesConectados = new ArrayList<>();
+
     public PrincipalSrv() {
         initComponents();
     }
+
     @SuppressWarnings("unchecked")
-    // <editor-fold defaultstate="collapsed" desc="Generated Code">
     private void initComponents() {
         this.setTitle("Servidor ...");
 
@@ -39,17 +38,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         getContentPane().setLayout(null);
 
-        bIniciar.setFont(new java.awt.Font("Segoe UI", 0, 18)); // NOI18N
+        bIniciar.setFont(new java.awt.Font("Segoe UI", 0, 18));
         bIniciar.setText("INICIAR SERVIDOR");
-        bIniciar.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                bIniciarActionPerformed(evt);
-            }
-        });
+        bIniciar.addActionListener(evt -> bIniciarActionPerformed(evt));
         getContentPane().add(bIniciar);
         bIniciar.setBounds(100, 90, 250, 40);
 
-        jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
+        jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
         jLabel1.setText("SERVIDOR TCP : HOEL");
         getContentPane().add(jLabel1);
@@ -57,60 +52,97 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
         mensajesTxt.setColumns(25);
         mensajesTxt.setRows(5);
+        mensajesTxt.setEditable(false);
 
         jScrollPane1.setViewportView(mensajesTxt);
-
         getContentPane().add(jScrollPane1);
-        jScrollPane1.setBounds(20, 160, 410, 70);
+        jScrollPane1.setBounds(20, 160, 410, 100);
 
-        setSize(new java.awt.Dimension(491, 290));
+        setSize(new java.awt.Dimension(491, 310));
         setLocationRelativeTo(null);
-    }// </editor-fold>
-
-    /**
-     * @param args the command line arguments
-     */
-    public static void main(String args[]) {
-        /* Create and display the form */
-        java.awt.EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                new PrincipalSrv().setVisible(true);
-            }
-        });
-
     }
+
     private void bIniciarActionPerformed(java.awt.event.ActionEvent evt) {
         iniciarServidor();
     }
 
-    private void iniciarServidor() {
-        JOptionPane.showMessageDialog(this, "Iniciando servidor");
-        new Thread(new Runnable() {
-            public void run() {
-                try {
-                    InetAddress addr = InetAddress.getLocalHost();
-                    serverSocket = new ServerSocket( PORT);
-                    mensajesTxt.append("Servidor TCP en ejecución: "+ addr + " ,Puerto " + serverSocket.getLocalPort()+ "\n");
-                    while (true) {
-                        clientSocket = serverSocket.accept();
-                        in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                        String linea;
-                        out = new PrintWriter(clientSocket.getOutputStream(), true);
-                        while ((linea = in.readLine()) != null) {
-                            mensajesTxt.append("Cliente: " + linea + "\n");
-                            out.println("Mensaje recibido en el server " );
-                        }
+    /**
+     * Envía un mensaje a TODOS los clientes conectados (broadcast)
+     */
+    private synchronized void broadcast(String mensaje) {
+        // Iteramos con una copia para evitar ConcurrentModificationException
+        for (PrintWriter writer : new ArrayList<>(clientesConectados)) {
+            writer.println(mensaje);
+        }
+    }
 
-                    }
-                } catch (IOException ex) {
-                    ex.printStackTrace();
-                    mensajesTxt.append("Error en el servidor: " + ex.getMessage() + "\n");
+    private void manejarCliente(Socket clientSocket) {
+        PrintWriter out = null;
+        try {
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(clientSocket.getInputStream())
+            );
+            out = new PrintWriter(clientSocket.getOutputStream(), true);
+
+            // Registrar este cliente en la lista
+            synchronized (clientesConectados) {
+                clientesConectados.add(out);
+            }
+
+            String clienteInfo = clientSocket.getInetAddress() + ":" + clientSocket.getPort();
+            log("Cliente conectado: " + clienteInfo);
+
+            String linea;
+            while ((linea = in.readLine()) != null) {
+                final String mensajeRecibido = "Cliente [" + clienteInfo + "]: " + linea;
+                log(mensajeRecibido);
+
+                // Reenviar el mensaje a TODOS los clientes (broadcast)
+                broadcast(mensajeRecibido);
+            }
+
+        } catch (IOException e) {
+            log("Error con cliente: " + e.getMessage());
+        } finally {
+            // Al desconectarse, quitarlo de la lista
+            if (out != null) {
+                synchronized (clientesConectados) {
+                    clientesConectados.remove(out);
                 }
+            }
+            try { clientSocket.close(); } catch (IOException ignored) {}
+            log("Un cliente se desconectó. Clientes activos: " + clientesConectados.size());
+        }
+    }
+
+    /** Escribe en el JTextArea de forma segura desde cualquier hilo */
+    private void log(String mensaje) {
+        SwingUtilities.invokeLater(() -> mensajesTxt.append(mensaje + "\n"));
+    }
+
+    private void iniciarServidor() {
+        bIniciar.setEnabled(false); // Evitar iniciar dos veces
+        new Thread(() -> {
+            try {
+                InetAddress addr = InetAddress.getLocalHost();
+                serverSocket = new ServerSocket(PORT);
+                log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
+
+                while (true) {
+                    Socket clientSocket = serverSocket.accept();
+                    new Thread(() -> manejarCliente(clientSocket)).start();
+                }
+            } catch (IOException ex) {
+                log("Error en el servidor: " + ex.getMessage());
             }
         }).start();
     }
 
-    // Variables declaration - do not modify
+    public static void main(String args[]) {
+        java.awt.EventQueue.invokeLater(() -> new PrincipalSrv().setVisible(true));
+    }
+
+    // Variables declaration
     private javax.swing.JButton bIniciar;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JTextArea mensajesTxt;
