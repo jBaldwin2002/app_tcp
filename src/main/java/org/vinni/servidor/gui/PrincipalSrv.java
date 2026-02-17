@@ -8,8 +8,8 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Author: Vinni
@@ -20,7 +20,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private ServerSocket serverSocket;
 
     // Lista de writers de todos los clientes conectados
-    private final List<PrintWriter> clientesConectados = new ArrayList<>();
+    private final Map<String, PrintWriter> clientesConectados = new ConcurrentHashMap<>();
 
     public PrincipalSrv() {
         initComponents();
@@ -67,61 +67,112 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     /**
-     * Envía un mensaje a TODOS los clientes conectados (broadcast)
+     * Envía mensaje a un cliente específico
      */
-    private synchronized void broadcast(String mensaje) {
-        // Iteramos con una copia para evitar ConcurrentModificationException
-        for (PrintWriter writer : new ArrayList<>(clientesConectados)) {
+    private void enviarA(String destinatario, String mensaje) {
+        PrintWriter writer = clientesConectados.get(destinatario);
+        if (writer != null) {
             writer.println(mensaje);
+        }
+    }
+    /**
+     * Envía la lista de clientes conectados a un cliente específico
+     */
+    private void enviarListaClientes(String nombreCliente) {
+        StringBuilder lista = new StringBuilder("CLIENTES_CONECTADOS:");
+        for (String cliente : clientesConectados.keySet()) {
+            if (!cliente.equals(nombreCliente)) {
+                lista.append(cliente).append(",");
+            }
+        }
+        enviarA(nombreCliente, lista.toString());
+    }
+
+    /**
+     * Notifica a todos sobre cambios en la lista de clientes
+     */
+    private void notificarCambioClientes() {
+        for (String cliente : clientesConectados.keySet()) {
+            enviarListaClientes(cliente);
         }
     }
 
     private void manejarCliente(Socket clientSocket) {
         PrintWriter out = null;
+        String nombreCliente = null;
+
         try {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(clientSocket.getInputStream())
             );
             out = new PrintWriter(clientSocket.getOutputStream(), true);
 
-            // Registrar este cliente en la lista
-            synchronized (clientesConectados) {
-                clientesConectados.add(out);
+            // Primer mensaje del cliente debe ser su nombre
+            nombreCliente = in.readLine();
+
+            if (nombreCliente == null || nombreCliente.trim().isEmpty()) {
+                out.println("ERROR:Nombre inválido");
+                clientSocket.close();
+                return;
             }
 
-            String clienteInfo = clientSocket.getInetAddress() + ":" + clientSocket.getPort();
-            log("Cliente conectado: " + clienteInfo);
+            // Verificar si el nombre ya existe
+            if (clientesConectados.containsKey(nombreCliente)) {
+                out.println("ERROR:Nombre ya existe");
+                clientSocket.close();
+                return;
+            }
+
+            // Registrar cliente
+            clientesConectados.put(nombreCliente, out);
+            out.println("OK:Conectado como " + nombreCliente);
+            log("Cliente conectado: " + nombreCliente);
+
+            // Notificar a todos sobre el nuevo cliente
+            notificarCambioClientes();
 
             String linea;
             while ((linea = in.readLine()) != null) {
-                final String mensajeRecibido = "Cliente [" + clienteInfo + "]: " + linea;
-                log(mensajeRecibido);
+                // Formato esperado: "DESTINATARIO:MENSAJE"
+                if (linea.contains(":")) {
+                    String[] partes = linea.split(":", 2);
+                    String destinatario = partes[0].trim();
+                    String mensaje = partes.length > 1 ? partes[1] : "";
 
-                // Reenviar el mensaje a TODOS los clientes (broadcast)
-                broadcast(mensajeRecibido);
+                    log(nombreCliente + " -> " + destinatario + ": " + mensaje);
+
+                    if (clientesConectados.containsKey(destinatario)) {
+                        // Enviar mensaje al destinatario
+                        enviarA(destinatario, "DE:" + nombreCliente + ":" + mensaje);
+                        // Confirmar al remitente
+                        enviarA(nombreCliente, "ENVIADO:" + destinatario + ":" + mensaje);
+                    } else {
+                        enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
+                    }
+                } else {
+                    log("Formato inválido de " + nombreCliente + ": " + linea);
+                }
             }
 
         } catch (IOException e) {
-            log("Error con cliente: " + e.getMessage());
+            log("Error con cliente " + nombreCliente + ": " + e.getMessage());
         } finally {
-            // Al desconectarse, quitarlo de la lista
-            if (out != null) {
-                synchronized (clientesConectados) {
-                    clientesConectados.remove(out);
-                }
+            // Desconectar cliente
+            if (nombreCliente != null) {
+                clientesConectados.remove(nombreCliente);
+                log("Cliente desconectado: " + nombreCliente + ". Clientes activos: " + clientesConectados.size());
+                notificarCambioClientes();
             }
             try { clientSocket.close(); } catch (IOException ignored) {}
-            log("Un cliente se desconectó. Clientes activos: " + clientesConectados.size());
         }
     }
 
-    /** Escribe en el JTextArea de forma segura desde cualquier hilo */
     private void log(String mensaje) {
         SwingUtilities.invokeLater(() -> mensajesTxt.append(mensaje + "\n"));
     }
 
     private void iniciarServidor() {
-        bIniciar.setEnabled(false); // Evitar iniciar dos veces
+        bIniciar.setEnabled(false);
         new Thread(() -> {
             try {
                 InetAddress addr = InetAddress.getLocalHost();
@@ -142,7 +193,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
         java.awt.EventQueue.invokeLater(() -> new PrincipalSrv().setVisible(true));
     }
 
-    // Variables declaration
     private javax.swing.JButton bIniciar;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JTextArea mensajesTxt;
