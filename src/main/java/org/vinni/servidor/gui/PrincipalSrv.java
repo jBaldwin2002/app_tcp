@@ -22,6 +22,10 @@ public class PrincipalSrv extends javax.swing.JFrame {
     // Lista de writers de todos los clientes conectados
     private final Map<String, PrintWriter> clientesConectados = new ConcurrentHashMap<>();
 
+    private static final String[] extensionesProhividas = {".exe", ".bat"};
+    private static final long tamanhoMin = 1024;
+    private static final long tamanhoMax = 1024 * 1024 * 5;
+
     public PrincipalSrv() {
         initComponents();
     }
@@ -97,6 +101,24 @@ public class PrincipalSrv extends javax.swing.JFrame {
         }
     }
 
+
+    private String validarArchivo(String nombreArchivo, long tamanoBytes) {
+        String nombreLower = nombreArchivo.toLowerCase();
+        for (String ext : extensionesProhividas ) {
+            if (nombreLower.endsWith(ext)) {
+                return "Archivo rechazado: extension '" + ext + "' no permitida";
+            }
+        }
+        if (tamanoBytes < tamanhoMin) {
+            return "Archivo rechazado: tamaño minimo es 1 KB (recibido: " + tamanoBytes + " bytes)";
+        }
+        if (tamanoBytes > tamanhoMax) {
+            return "Archivo rechazado: tamaño maximo es 5 MB (recibido: " + (tamanoBytes / 1024 / 1024) + " MB)";
+        }
+        return null;
+    }
+
+
     private void manejarCliente(Socket clientSocket) {
         PrintWriter out = null;
         String nombreCliente = null;
@@ -111,7 +133,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             nombreCliente = in.readLine();
 
             if (nombreCliente == null || nombreCliente.trim().isEmpty()) {
-                out.println("ERROR:Nombre inválido");
+                out.println("ERROR:Nombre invalido");
                 clientSocket.close();
                 return;
             }
@@ -133,8 +155,52 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
             String linea;
             while ((linea = in.readLine()) != null) {
-                // Formato esperado: "DESTINATARIO:MENSAJE"
-                if (linea.contains(":")) {
+
+                if (linea.startsWith("FILE_SEND:")) {
+                    String[] partes = linea.split(":", 5);
+                    if (partes.length < 5) {
+                        enviarA(nombreCliente, "ERROR:Formato de archivo invalido");
+                        continue;
+                    }
+                    String destinatario = partes[1].trim();
+                    String nombreArchivo = partes[2].trim();
+                    long tamanoBytes;
+                    try {
+                        tamanoBytes = Long.parseLong(partes[3].trim());
+                    } catch (NumberFormatException e) {
+                        enviarA(nombreCliente, "ERROR:Tamaño de archivo invalido");
+                        continue;
+                    }
+                    String base64Data = partes[4];
+
+                    // Validar extension y tamaño
+                    String errorValidacion = validarArchivo(nombreArchivo, tamanoBytes);
+                    if (errorValidacion != null) {
+                        enviarA(nombreCliente, "ERROR:" + errorValidacion);
+                        log("[ARCHIVO RECHAZADO] " + nombreCliente + " -> " + destinatario
+                                + " | " + nombreArchivo + " | " + errorValidacion);
+                        continue;
+                    }
+
+                    if (!clientesConectados.containsKey(destinatario)) {
+                        enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
+                        continue;
+                    }
+
+                    // Reenviar al destinatario
+                    // Formato que recibe el destinatario: FILE_RECV:remitente:nombreArchivo:tamanoBytes:base64Data
+                    enviarA(destinatario,
+                            "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
+
+                    // Confirmar al remitente
+                    enviarA(nombreCliente,
+                            "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
+
+                    log("[ARCHIVO] " + nombreCliente + " -> " + destinatario
+                            + " | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
+
+                    // Formato esperado: "DESTINATARIO:MENSAJE"
+                }else if (linea.contains(":")) {
                     String[] partes = linea.split(":", 2);
                     String destinatario = partes[0].trim();
                     String mensaje = partes.length > 1 ? partes[1] : "";
@@ -150,7 +216,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                         enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
                     }
                 } else {
-                    log("Formato inválido de " + nombreCliente + ": " + linea);
+                    log("Formato invalido de " + nombreCliente + ": " + linea);
                 }
             }
 
@@ -177,7 +243,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             try {
                 InetAddress addr = InetAddress.getLocalHost();
                 serverSocket = new ServerSocket(PORT);
-                log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
+                log("Servidor TCP en ejecucion: " + addr + ", Puerto " + serverSocket.getLocalPort());
 
                 while (true) {
                     Socket clientSocket = serverSocket.accept();
