@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.Random;
+import java.util.Random;
 
 /**
  * author: Vinni 2024
@@ -20,6 +22,15 @@ public class PrincipalCli extends javax.swing.JFrame {
 
     public PrincipalCli() {
         initComponents();
+        cargarIdAutomatico();
+    }
+
+    private void cargarIdAutomatico(){
+        Random random = new Random();
+        int tercer = random.nextInt(256);
+        int cuarto = random.nextInt(254) + 1;
+        String ipAleatoria = "192.168." + tercer + "." + cuarto;
+        nombreTxt.setText(ipAleatoria);
     }
 
     @SuppressWarnings("unchecked")
@@ -129,7 +140,7 @@ public class PrincipalCli extends javax.swing.JFrame {
         miNombre = nombreTxt.getText().trim();
 
         if (miNombre.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Ingresa tu nombre primero");
+            JOptionPane.showMessageDialog(this, "Error al generar el ID automático");
             return;
         }
 
@@ -138,15 +149,12 @@ public class PrincipalCli extends javax.swing.JFrame {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            // Enviar nombre al servidor
             out.println(miNombre);
 
-            // Esperar confirmación
             String respuesta = in.readLine();
             if (respuesta != null && respuesta.startsWith("OK:")) {
                 mensajesTxt.append(respuesta.substring(3) + "\n");
 
-                // Deshabilitar nombre y habilitar envío
                 nombreTxt.setEnabled(false);
                 bConectar.setEnabled(false);
                 mensajeTxt.setEnabled(true);
@@ -168,8 +176,11 @@ public class PrincipalCli extends javax.swing.JFrame {
                 }).start();
 
             } else if (respuesta != null && respuesta.startsWith("ERROR:")) {
-                JOptionPane.showMessageDialog(this, respuesta.substring(6));
-                socket.close();
+                if(respuesta.contains("Ya existe")){
+                    socket.close();
+                    cargarIdAutomatico();
+                    JOptionPane.showMessageDialog(this, respuesta.substring(6));
+                }
             }
 
         } catch (IOException e) {
