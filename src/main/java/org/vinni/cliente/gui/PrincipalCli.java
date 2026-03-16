@@ -172,8 +172,7 @@ public class PrincipalCli extends javax.swing.JFrame {
                     socket.close();
                     cargarIdAutomatico();
                     JOptionPane.showMessageDialog(this,
-                            "ID en uso, se genero uno nuevo: " + nombreTxt.getText()
-                                    + "\nIntenta conectar de nuevo.");
+                            "ID en uso, se genero uno nuevo: " + nombreTxt.getText() + "\nIntenta conectar de nuevo.");
                 } else {
                     JOptionPane.showMessageDialog(this, respuesta.substring(6));
                     socket.close();
@@ -193,6 +192,7 @@ public class PrincipalCli extends javax.swing.JFrame {
             if (mensaje.startsWith("CLIENTES_CONECTADOS:")) {
                 String[] clientes = mensaje.substring(20).split(",");
                 destinatarioCmb.removeAllItems();
+                destinatarioCmb.addItem("TODOS");
                 for (String cliente : clientes) {
                     if (!cliente.trim().isEmpty()) {
                         destinatarioCmb.addItem(cliente.trim());
@@ -212,8 +212,7 @@ public class PrincipalCli extends javax.swing.JFrame {
                 long   tamanoBytes = Long.parseLong(partes[3]);
                 String base64Data = partes[4];
 
-                log("[ARCHIVO] De " + remitente + ": " + nombreArchivo
-                        + " (" + (tamanoBytes / 1024) + " KB) — Elige donde guardar...");
+                log("[ARCHIVO] De " + remitente + ": " + nombreArchivo + " (" + (tamanoBytes / 1024) + " KB) — Elige donde guardar...");
 
                 // Donde guardar
                 JFileChooser chooser = new JFileChooser();
@@ -240,8 +239,7 @@ public class PrincipalCli extends javax.swing.JFrame {
                 String dest = partes.length > 1 ? partes[1] : "?";
                 String nombreArchivo = partes.length > 2 ? partes[2] : "?";
                 long   tamano = partes.length > 3 ? Long.parseLong(partes[3]) : 0;
-                log("[ARCHIVO] Enviado a " + dest + ": " + nombreArchivo
-                        + " (" + (tamano / 1024) + " KB)");
+                log("[ARCHIVO] Enviado a " + dest + ": " + nombreArchivo + " (" + (tamano / 1024) + " KB)");
 
                 //Mensaje de texto normal
             } else if (mensaje.startsWith("DE:")) {
@@ -270,6 +268,13 @@ public class PrincipalCli extends javax.swing.JFrame {
         if (out == null || destinatarioCmb.getSelectedItem() == null) return;
 
         String destinatario = (String) destinatarioCmb.getSelectedItem();
+
+        if (destinatario.equals("TODOS")) {
+            JOptionPane.showMessageDialog(this,
+                    "El envio de archivos no esta disponible para 'TODOS'.\nSelecciona un destinatario especifico.",
+                    "Destinatario invalido", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Seleccionar archivo para enviar a " + destinatario);
@@ -341,7 +346,12 @@ public class PrincipalCli extends javax.swing.JFrame {
         String texto = mensajeTxt.getText().trim();
         if (texto.isEmpty()) return;
         String destinatario = (String) destinatarioCmb.getSelectedItem();
-        out.println(destinatario + ":" + texto);
+
+        if (destinatario.equals("TODOS")) {
+            out.println("TODOS:" + texto);
+        } else {
+            out.println(destinatario + ":" + texto);
+        }
         mensajeTxt.setText("");
     }
 

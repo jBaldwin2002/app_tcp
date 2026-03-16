@@ -101,6 +101,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
         }
     }
 
+    private void broadcast(String remitente, String mensaje) {
+        for (Map.Entry<String, PrintWriter> entry : clientesConectados.entrySet()) {
+            if (!entry.getKey().equals(remitente)) {
+                entry.getValue().println("DE:" + remitente + ":[TODOS] " + mensaje);
+            }
+        }
+    }
 
     private String validarArchivo(String nombreArchivo, long tamanoBytes) {
         String nombreLower = nombreArchivo.toLowerCase();
@@ -198,6 +205,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
                     log("[ARCHIVO] " + nombreCliente + " -> " + destinatario
                             + " | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
+
+
+                } else if (linea.startsWith("TODOS:")) {
+                    String mensaje = linea.substring(6);
+                    log(nombreCliente + " -> [TODOS]: " + mensaje);
+                    broadcast(nombreCliente, mensaje);
+                    enviarA(nombreCliente, "BROADCAST_OK:" + mensaje);
 
                     // Formato esperado: "DESTINATARIO:MENSAJE"
                 }else if (linea.contains(":")) {
