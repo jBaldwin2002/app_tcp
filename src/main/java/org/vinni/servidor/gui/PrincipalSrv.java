@@ -20,11 +20,8 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private ServerSocket serverSocket;
     private boolean servidorCorriendo = false;
 
-    // Políticas de reinicio
-    private final int MAX_REINICIOS = 5;
-    private final int ESPERA_REINICIO_MS = 5000;
-
-    // Lista de writers de todos los clientes conectados
+    // Lista de clientes conectados (Guardamos el Socket entero para poder cerrarlo forzosamente)
+    private final Map<String, Socket> socketsConectados = new ConcurrentHashMap<>();
     private final Map<String, PrintWriter> clientesConectados = new ConcurrentHashMap<>();
 
     private static final String[] extensionesProhividas = {".exe", ".bat"};
@@ -39,7 +36,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private void initComponents() {
         this.setTitle("Servidor ...");
 
-        bIniciar = new javax.swing.JButton();
+        bAccion = new javax.swing.JButton();
         jLabel1 = new javax.swing.JLabel();
         mensajesTxt = new JTextArea();
         jScrollPane1 = new javax.swing.JScrollPane();
@@ -47,11 +44,11 @@ public class PrincipalSrv extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         getContentPane().setLayout(null);
 
-        bIniciar.setFont(new java.awt.Font("Segoe UI", 0, 18));
-        bIniciar.setText("INICIAR SERVIDOR");
-        bIniciar.addActionListener(evt -> bIniciarActionPerformed(evt));
-        getContentPane().add(bIniciar);
-        bIniciar.setBounds(100, 90, 250, 40);
+        bAccion.setFont(new java.awt.Font("Segoe UI", 1, 14));
+        bAccion.setText("INICIAR SERVIDOR");
+        bAccion.addActionListener(evt -> toggleServidor());
+        getContentPane().add(bAccion);
+        bAccion.setBounds(100, 90, 250, 40);
 
         jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
@@ -71,54 +68,70 @@ public class PrincipalSrv extends javax.swing.JFrame {
         setLocationRelativeTo(null);
     }
 
-    private void bIniciarActionPerformed(java.awt.event.ActionEvent evt) {
+    private void toggleServidor() {
         if (!servidorCorriendo) {
-            iniciarServidorConPoliticas();
+            iniciarServidor();
+        } else {
+            detenerServidorManual();
         }
     }
 
-    /**
-     * Aplica las políticas de reinicio si el socket falla
-     */
-    private void iniciarServidorConPoliticas() {
-        bIniciar.setEnabled(false);
+    private void iniciarServidor() {
         servidorCorriendo = true;
+        bAccion.setText("DETENER SERVIDOR");
+        bAccion.setForeground(java.awt.Color.RED);
 
         new Thread(() -> {
-            int intentosReinicio = 0;
+            try {
+                serverSocket = new ServerSocket(PORT);
+                InetAddress addr = InetAddress.getLocalHost();
+                log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
 
-            while (intentosReinicio < MAX_REINICIOS && servidorCorriendo) {
-                try {
-                    serverSocket = new ServerSocket(PORT);
-                    InetAddress addr = InetAddress.getLocalHost();
-                    log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
-                    intentosReinicio = 0; // Se reinician los intentos si la conexión es exitosa
-
-                    while (servidorCorriendo) {
-                        Socket clientSocket = serverSocket.accept();
-                        new Thread(() -> manejarCliente(clientSocket)).start();
-                    }
-
-                } catch (IOException ex) {
-                    intentosReinicio++;
-                    log("[ERROR FATAL] Fallo en el servidor: " + ex.getMessage());
-
-                    if (intentosReinicio < MAX_REINICIOS) {
-                        log("--> Aplicando Política: Reiniciando servidor en " + (ESPERA_REINICIO_MS / 1000) + " seg... (Intento " + intentosReinicio + " de " + MAX_REINICIOS + ")");
-                        try {
-                            Thread.sleep(ESPERA_REINICIO_MS);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                    } else {
-                        log("--> Política Agotada: No se pudo reiniciar el servidor tras " + MAX_REINICIOS + " intentos.");
-                        servidorCorriendo = false;
-                        SwingUtilities.invokeLater(() -> bIniciar.setEnabled(true));
-                    }
+                while (servidorCorriendo) {
+                    Socket clientSocket = serverSocket.accept();
+                    new Thread(() -> manejarCliente(clientSocket)).start();
                 }
+            } catch (IOException ex) {
+                if (servidorCorriendo) {
+                    log("[ERROR] Fallo en el servidor: " + ex.getMessage());
+                } else {
+                    log("--> El servidor ha sido detenido manualmente.");
+                }
+            } finally {
+                detenerServidorManual();
             }
         }).start();
     }
+
+    private void detenerServidorManual() {
+        servidorCorriendo = false;
+
+        // 1. Cerrar el ServerSocket para no aceptar más conexiones
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (IOException ignored) {}
+
+        // 2. Desconectar a todos los clientes a la fuerza para que activen su política de reconexión
+        for (Socket socket : socketsConectados.values()) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {}
+        }
+
+        socketsConectados.clear();
+        clientesConectados.clear();
+
+        SwingUtilities.invokeLater(() -> {
+            bAccion.setText("INICIAR SERVIDOR");
+            bAccion.setForeground(java.awt.Color.BLACK);
+        });
+
+        log("Servidor apagado. Todas las conexiones fueron cerradas.");
+    }
+
+    // ... (El resto de los métodos enviarA, enviarListaClientes, notificarCambioClientes, broadcast, broadcastArchivo, validarArchivo se mantienen exactamente igual que en la versión anterior) ...
 
     private void enviarA(String destinatario, String mensaje) {
         PrintWriter writer = clientesConectados.get(destinatario);
@@ -126,9 +139,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             writer.println(mensaje);
         }
     }
-    /**
-     * Envía la lista de clientes conectados a un cliente específico
-     */
+
     private void enviarListaClientes(String nombreCliente) {
         StringBuilder lista = new StringBuilder("CLIENTES_CONECTADOS:");
         for (String cliente : clientesConectados.keySet()) {
@@ -202,6 +213,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             }
 
             clientesConectados.put(nombreCliente, out);
+            socketsConectados.put(nombreCliente, clientSocket); // se guarda el socket
             out.println("OK:Conectado como " + nombreCliente);
             log("Cliente conectado: " + nombreCliente);
             notificarCambioClientes();
@@ -228,7 +240,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
                     if (destinatario.equals("TODOS")) {
                         broadcastArchivo(nombreCliente, nombreArchivo, tamanoBytes, base64Data);
                         enviarA(nombreCliente, "ARCHIVO:TODOS:" + nombreArchivo + ":" + tamanoBytes);
-                        log("[ARCHIVO] " + nombreCliente + " -> [TODOS] | " + nombreArchivo);
                     } else {
                         if (!clientesConectados.containsKey(destinatario)) {
                             enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
@@ -236,7 +247,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
                         }
                         enviarA(destinatario, "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
                         enviarA(nombreCliente, "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
-                        log("[ARCHIVO] " + nombreCliente + " -> " + destinatario + " | " + nombreArchivo);
                     }
 
                 } else if (linea.startsWith("TODOS:")) {
@@ -260,12 +270,15 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 }
             }
         } catch (Exception e) {
-            log("Conexión perdida con cliente " + nombreCliente);
+            // El error salta aquí si el cliente se desconecta abruptamente o si el servidor cierra el socket.
         } finally {
             if (nombreCliente != null) {
                 clientesConectados.remove(nombreCliente);
-                log("Cliente desconectado: " + nombreCliente + ". Activos: " + clientesConectados.size());
-                notificarCambioClientes();
+                socketsConectados.remove(nombreCliente);
+                if (servidorCorriendo) {
+                    log("Cliente desconectado: " + nombreCliente + ". Activos: " + clientesConectados.size());
+                    notificarCambioClientes();
+                }
             }
             try { clientSocket.close(); } catch (Exception ignored) {}
         }
@@ -279,7 +292,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
         java.awt.EventQueue.invokeLater(() -> new PrincipalSrv().setVisible(true));
     }
 
-    private javax.swing.JButton bIniciar;
+    private javax.swing.JButton bAccion;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JTextArea mensajesTxt;
     private javax.swing.JScrollPane jScrollPane1;

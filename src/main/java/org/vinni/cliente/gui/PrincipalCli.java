@@ -148,7 +148,7 @@ public class PrincipalCli extends javax.swing.JFrame {
         if (miNombre.isEmpty()) return;
 
         bConectar.setEnabled(false); // Evitar doble clic
-        log("Iniciando conexión...");
+        log("Iniciando conexion...");
         ejecutarPoliticaDeReintentos();
     }
 
@@ -184,7 +184,7 @@ public class PrincipalCli extends javax.swing.JFrame {
                         socket.close();
                         SwingUtilities.invokeLater(() -> {
                             cargarIdAutomatico();
-                            JOptionPane.showMessageDialog(this, "ID en uso, se generó uno nuevo. Intenta conectar de nuevo.");
+                            JOptionPane.showMessageDialog(this, "ID en uso, se genero uno nuevo. Intenta conectar de nuevo.");
                             bConectar.setEnabled(true);
                         });
                         return; // Rompe el hilo de reintentos
@@ -206,7 +206,7 @@ public class PrincipalCli extends javax.swing.JFrame {
             }
 
             if (!conexionExitosa) {
-                log("--> Política agotada: No se pudo conectar tras " + MAX_REINTENTOS + " intentos.");
+                log("--> Reintentos agotados: No se pudo conectar tras " + MAX_REINTENTOS + " intentos.");
                 SwingUtilities.invokeLater(() -> bConectar.setEnabled(true));
             }
         }).start();
@@ -219,9 +219,11 @@ public class PrincipalCli extends javax.swing.JFrame {
                 while ((fromServer = in.readLine()) != null) {
                     procesarMensaje(fromServer);
                 }
+
+                throw new IOException("El servidor cerro la conexion intencionalmente (EOF).");
+
             } catch (IOException ex) {
-                // Si el readline falla, se perdió la conexión con el servidor activo.
-                log("¡Conexión perdida con el servidor!");
+                log("¡Conexion perdida con el servidor!");
                 cambiarEstadoUI(false);
 
                 // Disparar reconexión automática
@@ -297,7 +299,7 @@ public class PrincipalCli extends javax.swing.JFrame {
 
         long tamanoBytes = archivo.length();
         if (tamanoBytes < tamanhoMin || tamanoBytes > tamanhoMax) {
-            JOptionPane.showMessageDialog(this, "Tamaño de archivo inválido. (Min: 1KB, Max: 5MB)");
+            JOptionPane.showMessageDialog(this, "Tamaño de archivo invalido. (Min: 1KB, Max: 5MB)");
             return;
         }
 
@@ -345,3 +347,5 @@ public class PrincipalCli extends javax.swing.JFrame {
     private javax.swing.JTextField nombreTxt;
     private javax.swing.JComboBox<String> destinatarioCmb;
 }
+//ds
+//abstr
