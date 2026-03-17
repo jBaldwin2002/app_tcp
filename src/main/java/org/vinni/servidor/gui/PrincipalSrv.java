@@ -240,6 +240,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                     if (destinatario.equals("TODOS")) {
                         broadcastArchivo(nombreCliente, nombreArchivo, tamanoBytes, base64Data);
                         enviarA(nombreCliente, "ARCHIVO:TODOS:" + nombreArchivo + ":" + tamanoBytes);
+                        log("[ARCHIVO] " + nombreCliente + " -> [TODOS] | " + nombreArchivo);
                     } else {
                         if (!clientesConectados.containsKey(destinatario)) {
                             enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
@@ -247,6 +248,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                         }
                         enviarA(destinatario, "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
                         enviarA(nombreCliente, "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
+                        log("[ARCHIVO] " + nombreCliente + " -> " + destinatario + " | " + nombreArchivo);
                     }
 
                 } else if (linea.startsWith("TODOS:")) {
