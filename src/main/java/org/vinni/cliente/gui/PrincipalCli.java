@@ -2,6 +2,7 @@ package org.vinni.cliente.gui;
 
 import javax.swing.*;
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.util.Base64;
@@ -17,6 +18,11 @@ public class PrincipalCli extends javax.swing.JFrame {
     private PrintWriter out;
     private BufferedReader in;
     private String miNombre;
+
+    // Políticas de Reconexión y Timeouts
+    private final int MAX_REINTENTOS = 5;
+    private final int TIEMPO_REINTENTO_MS = 3000; // 3 segundos
+    private final int CONNECTION_TIMEOUT_MS = 2000; // 2 segundos de timeout para el connect
 
     private static final String[] extensionesProhividas = {".exe", ".bat"};
     private static final long tamanhoMin = 1024;
@@ -55,21 +61,18 @@ public class PrincipalCli extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         getContentPane().setLayout(null);
 
-        // Título
         jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
         jLabel1.setText("CLIENTE TCP : DFRACK");
         getContentPane().add(jLabel1);
         jLabel1.setBounds(20, 10, 250, 20);
 
-        // Boton conectar
         bConectar.setFont(new java.awt.Font("Segoe UI", 0, 14));
         bConectar.setText("CONECTAR");
-        bConectar.addActionListener(evt -> conectar());
+        bConectar.addActionListener(evt -> iniciarConexion());
         getContentPane().add(bConectar);
         bConectar.setBounds(340, 10, 130, 30);
 
-        // ID
         jLabel3.setFont(new java.awt.Font("Verdana", 0, 12));
         jLabel3.setText("ID:");
         getContentPane().add(jLabel3);
@@ -81,7 +84,6 @@ public class PrincipalCli extends javax.swing.JFrame {
         getContentPane().add(nombreTxt);
         nombreTxt.setBounds(100, 45, 230, 25);
 
-        // Destinatario
         jLabel4.setFont(new java.awt.Font("Verdana", 0, 12));
         jLabel4.setText("Enviar a:");
         getContentPane().add(jLabel4);
@@ -92,7 +94,6 @@ public class PrincipalCli extends javax.swing.JFrame {
         getContentPane().add(destinatarioCmb);
         destinatarioCmb.setBounds(100, 85, 230, 25);
 
-        // Mensaje
         jLabel2.setFont(new java.awt.Font("Verdana", 0, 12));
         jLabel2.setText("Mensaje:");
         getContentPane().add(jLabel2);
@@ -104,7 +105,6 @@ public class PrincipalCli extends javax.swing.JFrame {
         getContentPane().add(mensajeTxt);
         mensajeTxt.setBounds(100, 125, 270, 25);
 
-        // Boton enviar mensaje
         btEnviar.setFont(new java.awt.Font("Verdana", 0, 12));
         btEnviar.setText("Enviar");
         btEnviar.setEnabled(false);
@@ -112,7 +112,6 @@ public class PrincipalCli extends javax.swing.JFrame {
         getContentPane().add(btEnviar);
         btEnviar.setBounds(380, 125, 90, 25);
 
-        // Boton enviar archivo
         btEnviarArchivo.setFont(new java.awt.Font("Verdana", 0, 11));
         btEnviarArchivo.setText("Enviar Archivo");
         btEnviarArchivo.setEnabled(false);
@@ -120,7 +119,6 @@ public class PrincipalCli extends javax.swing.JFrame {
         getContentPane().add(btEnviarArchivo);
         btEnviarArchivo.setBounds(100, 160, 150, 27);
 
-        // Area de mensajes
         mensajesTxt.setColumns(20);
         mensajesTxt.setRows(5);
         mensajesTxt.setEditable(false);
@@ -132,63 +130,109 @@ public class PrincipalCli extends javax.swing.JFrame {
         setLocationRelativeTo(null);
     }
 
+    private void cambiarEstadoUI(boolean conectado) {
+        SwingUtilities.invokeLater(() -> {
+            bConectar.setEnabled(!conectado);
+            mensajeTxt.setEnabled(conectado);
+            btEnviar.setEnabled(conectado);
+            btEnviarArchivo.setEnabled(conectado);
+            destinatarioCmb.setEnabled(conectado);
+            if (!conectado) {
+                destinatarioCmb.removeAllItems();
+            }
+        });
+    }
 
-    private void conectar() {
+    private void iniciarConexion() {
         miNombre = nombreTxt.getText().trim();
-        if (miNombre.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Error al generar el ID automatico");
-            return;
-        }
+        if (miNombre.isEmpty()) return;
 
-        try {
-            socket = new Socket("localhost", PORT);
-            out = new PrintWriter(socket.getOutputStream(), true);
-            in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        bConectar.setEnabled(false); // Evitar doble clic
+        log("Iniciando conexión...");
+        ejecutarPoliticaDeReintentos();
+    }
 
-            out.println(miNombre);
+    /**
+     * Hilo asíncrono para manejar Timeout y Reintentos
+     */
+    private void ejecutarPoliticaDeReintentos() {
+        new Thread(() -> {
+            int intentoActual = 1;
+            boolean conexionExitosa = false;
 
-            String respuesta = in.readLine();
-            if (respuesta != null && respuesta.startsWith("OK:")) {
-                log(respuesta.substring(3));
-                bConectar.setEnabled(false);
-                mensajeTxt.setEnabled(true);
-                btEnviar.setEnabled(true);
-                btEnviarArchivo.setEnabled(true);
-                destinatarioCmb.setEnabled(true);
+            while (intentoActual <= MAX_REINTENTOS && !conexionExitosa) {
+                try {
+                    log("Intento " + intentoActual + " de " + MAX_REINTENTOS + " ");
 
-                new Thread(() -> {
-                    try {
-                        String fromServer;
-                        while ((fromServer = in.readLine()) != null) {
-                            procesarMensaje(fromServer);
-                        }
-                    } catch (IOException ex) {
-                        SwingUtilities.invokeLater(() -> log("Conexion perdida"));
+                    socket = new Socket();
+                    // Timeout de conexión aquí
+                    socket.connect(new InetSocketAddress("localhost", PORT), CONNECTION_TIMEOUT_MS);
+
+                    out = new PrintWriter(socket.getOutputStream(), true);
+                    in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+                    out.println(miNombre);
+                    String respuesta = in.readLine();
+
+                    if (respuesta != null && respuesta.startsWith("OK:")) {
+                        conexionExitosa = true;
+                        log(respuesta.substring(3));
+                        cambiarEstadoUI(true);
+                        iniciarHiloEscucha(); // Arrancar escucha de mensajes
+                    } else if (respuesta != null && respuesta.startsWith("ERROR:Nombre ya existe")) {
+                        // Si el nombre existe, se cambia y se interrumpe la política (no es error de red)
+                        socket.close();
+                        SwingUtilities.invokeLater(() -> {
+                            cargarIdAutomatico();
+                            JOptionPane.showMessageDialog(this, "ID en uso, se generó uno nuevo. Intenta conectar de nuevo.");
+                            bConectar.setEnabled(true);
+                        });
+                        return; // Rompe el hilo de reintentos
                     }
-                }).start();
 
-            } else if (respuesta != null && respuesta.startsWith("ERROR:")) {
-                if (respuesta.contains("ya existe")) {
-                    socket.close();
-                    cargarIdAutomatico();
-                    JOptionPane.showMessageDialog(this,
-                            "ID en uso, se genero uno nuevo: " + nombreTxt.getText() + "\nIntenta conectar de nuevo.");
-                } else {
-                    JOptionPane.showMessageDialog(this, respuesta.substring(6));
-                    socket.close();
+                } catch (IOException e) {
+                    log("Fallo intento " + intentoActual + ": Servidor no disponible.");
+
+                    if (intentoActual < MAX_REINTENTOS) {
+                        try {
+                            log("Esperando " + (TIEMPO_REINTENTO_MS / 1000) + " segundos antes de reintentar...");
+                            Thread.sleep(TIEMPO_REINTENTO_MS);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
                 }
+                intentoActual++;
             }
 
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
-                    "No se pudo conectar al servidor");
-        }
+            if (!conexionExitosa) {
+                log("--> Política agotada: No se pudo conectar tras " + MAX_REINTENTOS + " intentos.");
+                SwingUtilities.invokeLater(() -> bConectar.setEnabled(true));
+            }
+        }).start();
+    }
+
+    private void iniciarHiloEscucha() {
+        new Thread(() -> {
+            try {
+                String fromServer;
+                while ((fromServer = in.readLine()) != null) {
+                    procesarMensaje(fromServer);
+                }
+            } catch (IOException ex) {
+                // Si el readline falla, se perdió la conexión con el servidor activo.
+                log("¡Conexión perdida con el servidor!");
+                cambiarEstadoUI(false);
+
+                // Disparar reconexión automática
+                log("--> Iniciando politica de RECONEXION automatica...");
+                ejecutarPoliticaDeReintentos();
+            }
+        }).start();
     }
 
     private void procesarMensaje(String mensaje) {
         SwingUtilities.invokeLater(() -> {
-
-            // Lista de clientes conectados
             if (mensaje.startsWith("CLIENTES_CONECTADOS:")) {
                 String[] clientes = mensaje.substring(20).split(",");
                 destinatarioCmb.removeAllItems();
@@ -198,159 +242,93 @@ public class PrincipalCli extends javax.swing.JFrame {
                         destinatarioCmb.addItem(cliente.trim());
                     }
                 }
-
-                // Recepcion de archivo
-                // Formato: FILE_RECV:remitente:nombreArchivo:tamanoBytes:base64Data
             } else if (mensaje.startsWith("FILE_RECV:")) {
                 String[] partes = mensaje.split(":", 5);
-                if (partes.length < 5) {
-                    log("[ERROR] Archivo recibido con formato invalido");
-                    return;
-                }
+                if (partes.length < 5) return;
                 String remitente = partes[1];
                 String nombreArchivo = partes[2];
-                long   tamanoBytes = Long.parseLong(partes[3]);
+                long tamanoBytes = Long.parseLong(partes[3]);
                 String base64Data = partes[4];
 
                 log("[ARCHIVO] De " + remitente + ": " + nombreArchivo + " (" + (tamanoBytes / 1024) + " KB) — Elige donde guardar...");
 
-                // Donde guardar
                 JFileChooser chooser = new JFileChooser();
-                chooser.setDialogTitle("Guardar archivo de " + remitente);
                 chooser.setSelectedFile(new File(nombreArchivo));
-                chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-
-                int resultado = chooser.showSaveDialog(this);
-                if (resultado == JFileChooser.APPROVE_OPTION) {
-                    File destino = chooser.getSelectedFile();
+                if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
                     try {
                         byte[] datos = Base64.getDecoder().decode(base64Data);
-                        Files.write(destino.toPath(), datos);
-                        log("[ARCHIVO] Guardado en: " + destino.getAbsolutePath());
+                        Files.write(chooser.getSelectedFile().toPath(), datos);
+                        log("[ARCHIVO] Guardado en: " + chooser.getSelectedFile().getAbsolutePath());
                     } catch (IOException e) {
                         log("[ERROR] No se pudo guardar: " + e.getMessage());
                     }
-                } else {
-                    log("[ARCHIVO] Guardado cancelado");
                 }
-
             } else if (mensaje.startsWith("FILE_OK:")) {
                 String[] partes = mensaje.split(":", 4);
-                String dest = partes.length > 1 ? partes[1] : "?";
-                String nombreArchivo = partes.length > 2 ? partes[2] : "?";
-                long   tamano = partes.length > 3 ? Long.parseLong(partes[3]) : 0;
-                log("[ARCHIVO] Enviado a " + dest + ": " + nombreArchivo + " (" + (tamano / 1024) + " KB)");
-
-                //Mensaje de texto normal
+                log("[ARCHIVO] Enviado a " + partes[1] + ": " + partes[2]);
             } else if (mensaje.startsWith("DE:")) {
                 String[] partes = mensaje.substring(3).split(":", 2);
-                String remitente = partes[0];
-                String contenido = partes.length > 1 ? partes[1] : "";
-                log("De " + remitente + ": " + contenido);
-
+                log("De " + partes[0] + ": " + (partes.length > 1 ? partes[1] : ""));
             } else if (mensaje.startsWith("ENVIADO:")) {
                 String[] partes = mensaje.substring(8).split(":", 2);
-                String dest = partes[0];
-                String contenido = partes.length > 1 ? partes[1] : "";
-                log("Enviado a " + dest + ": " + contenido);
-
-            } else if (mensaje.startsWith("ERROR:")) {
-                log("Error: " + mensaje.substring(6));
-
+                log("Enviado a " + partes[0] + ": " + (partes.length > 1 ? partes[1] : ""));
             } else {
                 log(mensaje);
             }
         });
     }
 
-
     private void seleccionarYEnviarArchivo() {
         if (out == null || destinatarioCmb.getSelectedItem() == null) return;
-
         String destinatario = (String) destinatarioCmb.getSelectedItem();
 
-
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Seleccionar archivo para enviar a " + destinatario);
-        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-
-        int resultado = chooser.showOpenDialog(this);
-        if (resultado != JFileChooser.APPROVE_OPTION) return;
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
 
         File archivo = chooser.getSelectedFile();
-
-        // Validacion de extension
         String nombreLower = archivo.getName().toLowerCase();
+
         for (String ext : extensionesProhividas) {
             if (nombreLower.endsWith(ext)) {
-                JOptionPane.showMessageDialog(this,
-                        "No se permiten archivos con extension '" + ext + "'",
-                        "Extension no permitida", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(this, "No se permiten archivos con extension '" + ext + "'");
                 return;
             }
         }
 
-
         long tamanoBytes = archivo.length();
-        if (tamanoBytes < tamanhoMin) {
-            JOptionPane.showMessageDialog(this,
-                    "El archivo es demasiado pequeño.\n"
-                            + "Tamaño mínimo: 1 KB\n"
-                            + "Tamaño del archivo: " + tamanoBytes + " bytes",
-                    "Archivo muy pequeño", JOptionPane.WARNING_MESSAGE);
+        if (tamanoBytes < tamanhoMin || tamanoBytes > tamanhoMax) {
+            JOptionPane.showMessageDialog(this, "Tamaño de archivo inválido. (Min: 1KB, Max: 5MB)");
             return;
         }
 
-        if (tamanoBytes > tamanhoMax) {
-            JOptionPane.showMessageDialog(this,
-                    "El archivo supera el límite permitido.\n"
-                            + "Tamaño maximo: 5 MB\n"
-                            + "Tamaño del archivo: "
-                            + String.format("%.2f", tamanoBytes / 1024.0 / 1024.0) + " MB",
-                    "Archivo muy grande", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        //Leer, codificar y enviar en hilo aparte
         btEnviarArchivo.setEnabled(false);
         log("[ARCHIVO] Enviando " + archivo.getName() + " a " + destinatario + "...");
 
-        final File archivoFinal = archivo;
         new Thread(() -> {
             try {
-                byte[] datos  = Files.readAllBytes(archivoFinal.toPath());
+                byte[] datos = Files.readAllBytes(archivo.toPath());
                 String base64 = Base64.getEncoder().encodeToString(datos);
-
-                // Formato: FILE_SEND:destinatario:nombreArchivo:tamanoBytes:base64Data
-                out.println("FILE_SEND:" + destinatario + ":"
-                        + archivoFinal.getName() + ":" + tamanoBytes + ":" + base64);
-
+                out.println("FILE_SEND:" + destinatario + ":" + archivo.getName() + ":" + tamanoBytes + ":" + base64);
             } catch (IOException e) {
-                SwingUtilities.invokeLater(() ->
-                        log("[ERROR] No se pudo leer el archivo: " + e.getMessage()));
+                SwingUtilities.invokeLater(() -> log("[ERROR] No se pudo leer: " + e.getMessage()));
             } finally {
                 SwingUtilities.invokeLater(() -> btEnviarArchivo.setEnabled(true));
             }
         }).start();
     }
 
-
     private void enviarMensaje() {
         if (out == null || destinatarioCmb.getSelectedItem() == null) return;
         String texto = mensajeTxt.getText().trim();
         if (texto.isEmpty()) return;
-        String destinatario = (String) destinatarioCmb.getSelectedItem();
 
-        if (destinatario.equals("TODOS")) {
-            out.println("TODOS:" + texto);
-        } else {
-            out.println(destinatario + ":" + texto);
-        }
+        String destinatario = (String) destinatarioCmb.getSelectedItem();
+        out.println((destinatario.equals("TODOS") ? "TODOS:" : destinatario + ":") + texto);
         mensajeTxt.setText("");
     }
 
     private void log(String mensaje) {
-        mensajesTxt.append(mensaje + "\n");
+        SwingUtilities.invokeLater(() -> mensajesTxt.append(mensaje + "\n"));
     }
 
     public static void main(String args[]) {

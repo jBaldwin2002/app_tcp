@@ -18,6 +18,11 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
     private final int PORT = 12345;
     private ServerSocket serverSocket;
+    private boolean servidorCorriendo = false;
+
+    // Políticas de reinicio
+    private final int MAX_REINICIOS = 5;
+    private final int ESPERA_REINICIO_MS = 5000;
 
     // Lista de writers de todos los clientes conectados
     private final Map<String, PrintWriter> clientesConectados = new ConcurrentHashMap<>();
@@ -67,12 +72,54 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     private void bIniciarActionPerformed(java.awt.event.ActionEvent evt) {
-        iniciarServidor();
+        if (!servidorCorriendo) {
+            iniciarServidorConPoliticas();
+        }
     }
 
     /**
-     * Envía mensaje a un cliente específico
+     * Aplica las políticas de reinicio si el socket falla
      */
+    private void iniciarServidorConPoliticas() {
+        bIniciar.setEnabled(false);
+        servidorCorriendo = true;
+
+        new Thread(() -> {
+            int intentosReinicio = 0;
+
+            while (intentosReinicio < MAX_REINICIOS && servidorCorriendo) {
+                try {
+                    serverSocket = new ServerSocket(PORT);
+                    InetAddress addr = InetAddress.getLocalHost();
+                    log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
+                    intentosReinicio = 0; // Se reinician los intentos si la conexión es exitosa
+
+                    while (servidorCorriendo) {
+                        Socket clientSocket = serverSocket.accept();
+                        new Thread(() -> manejarCliente(clientSocket)).start();
+                    }
+
+                } catch (IOException ex) {
+                    intentosReinicio++;
+                    log("[ERROR FATAL] Fallo en el servidor: " + ex.getMessage());
+
+                    if (intentosReinicio < MAX_REINICIOS) {
+                        log("--> Aplicando Política: Reiniciando servidor en " + (ESPERA_REINICIO_MS / 1000) + " seg... (Intento " + intentosReinicio + " de " + MAX_REINICIOS + ")");
+                        try {
+                            Thread.sleep(ESPERA_REINICIO_MS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    } else {
+                        log("--> Política Agotada: No se pudo reiniciar el servidor tras " + MAX_REINICIOS + " intentos.");
+                        servidorCorriendo = false;
+                        SwingUtilities.invokeLater(() -> bIniciar.setEnabled(true));
+                    }
+                }
+            }
+        }).start();
+    }
+
     private void enviarA(String destinatario, String mensaje) {
         PrintWriter writer = clientesConectados.get(destinatario);
         if (writer != null) {
@@ -92,9 +139,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
         enviarA(nombreCliente, lista.toString());
     }
 
-    /**
-     * Notifica a todos sobre cambios en la lista de clientes
-     */
     private void notificarCambioClientes() {
         for (String cliente : clientesConectados.keySet()) {
             enviarListaClientes(cliente);
@@ -135,18 +179,14 @@ public class PrincipalSrv extends javax.swing.JFrame {
         return null;
     }
 
-
     private void manejarCliente(Socket clientSocket) {
         PrintWriter out = null;
         String nombreCliente = null;
 
         try {
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(clientSocket.getInputStream())
-            );
+            BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
 
-            // Primer mensaje del cliente debe ser su nombre
             nombreCliente = in.readLine();
 
             if (nombreCliente == null || nombreCliente.trim().isEmpty()) {
@@ -155,24 +195,19 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 return;
             }
 
-            // Verificar si el nombre ya existe
             if (clientesConectados.containsKey(nombreCliente)) {
                 out.println("ERROR:Nombre ya existe");
                 clientSocket.close();
                 return;
             }
 
-            // Registrar cliente
             clientesConectados.put(nombreCliente, out);
             out.println("OK:Conectado como " + nombreCliente);
             log("Cliente conectado: " + nombreCliente);
-
-            // Notificar a todos sobre el nuevo cliente
             notificarCambioClientes();
 
             String linea;
             while ((linea = in.readLine()) != null) {
-
                 if (linea.startsWith("FILE_SEND:")) {
                     String[] partes = linea.split(":", 5);
                     if (partes.length < 5) {
@@ -181,28 +216,19 @@ public class PrincipalSrv extends javax.swing.JFrame {
                     }
                     String destinatario = partes[1].trim();
                     String nombreArchivo = partes[2].trim();
-                    long tamanoBytes;
-                    try {
-                        tamanoBytes = Long.parseLong(partes[3].trim());
-                    } catch (NumberFormatException e) {
-                        enviarA(nombreCliente, "ERROR:Tamaño de archivo invalido");
-                        continue;
-                    }
+                    long tamanoBytes = Long.parseLong(partes[3].trim());
                     String base64Data = partes[4];
 
-                    // Validar extension y tamaño
                     String errorValidacion = validarArchivo(nombreArchivo, tamanoBytes);
                     if (errorValidacion != null) {
                         enviarA(nombreCliente, "ERROR:" + errorValidacion);
-                        log("[ARCHIVO RECHAZADO] " + nombreCliente + " -> " + destinatario
-                                + " | " + nombreArchivo + " | " + errorValidacion);
                         continue;
                     }
 
                     if (destinatario.equals("TODOS")) {
                         broadcastArchivo(nombreCliente, nombreArchivo, tamanoBytes, base64Data);
                         enviarA(nombreCliente, "ARCHIVO:TODOS:" + nombreArchivo + ":" + tamanoBytes);
-                        log("[ARCHIVO] " + nombreCliente + " -> [TODOS] | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
+                        log("[ARCHIVO] " + nombreCliente + " -> [TODOS] | " + nombreArchivo);
                     } else {
                         if (!clientesConectados.containsKey(destinatario)) {
                             enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
@@ -210,9 +236,8 @@ public class PrincipalSrv extends javax.swing.JFrame {
                         }
                         enviarA(destinatario, "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
                         enviarA(nombreCliente, "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
-                        log("[ARCHIVO] " + nombreCliente + " -> " + destinatario + " | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
+                        log("[ARCHIVO] " + nombreCliente + " -> " + destinatario + " | " + nombreArchivo);
                     }
-
 
                 } else if (linea.startsWith("TODOS:")) {
                     String mensaje = linea.substring(6);
@@ -220,60 +245,34 @@ public class PrincipalSrv extends javax.swing.JFrame {
                     broadcast(nombreCliente, mensaje);
                     enviarA(nombreCliente, "BROADCAST_OK:" + mensaje);
 
-                    // Formato esperado: "DESTINATARIO:MENSAJE"
-                }else if (linea.contains(":")) {
+                } else if (linea.contains(":")) {
                     String[] partes = linea.split(":", 2);
                     String destinatario = partes[0].trim();
                     String mensaje = partes.length > 1 ? partes[1] : "";
 
                     log(nombreCliente + " -> " + destinatario + ": " + mensaje);
-
                     if (clientesConectados.containsKey(destinatario)) {
-                        // Enviar mensaje al destinatario
                         enviarA(destinatario, "DE:" + nombreCliente + ":" + mensaje);
-                        // Confirmar al remitente
                         enviarA(nombreCliente, "ENVIADO:" + destinatario + ":" + mensaje);
                     } else {
                         enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
                     }
-                } else {
-                    log("Formato invalido de " + nombreCliente + ": " + linea);
                 }
             }
-
-        } catch (IOException e) {
-            log("Error con cliente " + nombreCliente + ": " + e.getMessage());
+        } catch (Exception e) {
+            log("Conexión perdida con cliente " + nombreCliente);
         } finally {
-            // Desconectar cliente
             if (nombreCliente != null) {
                 clientesConectados.remove(nombreCliente);
-                log("Cliente desconectado: " + nombreCliente + ". Clientes activos: " + clientesConectados.size());
+                log("Cliente desconectado: " + nombreCliente + ". Activos: " + clientesConectados.size());
                 notificarCambioClientes();
             }
-            try { clientSocket.close(); } catch (IOException ignored) {}
+            try { clientSocket.close(); } catch (Exception ignored) {}
         }
     }
 
     private void log(String mensaje) {
         SwingUtilities.invokeLater(() -> mensajesTxt.append(mensaje + "\n"));
-    }
-
-    private void iniciarServidor() {
-        bIniciar.setEnabled(false);
-        new Thread(() -> {
-            try {
-                InetAddress addr = InetAddress.getLocalHost();
-                serverSocket = new ServerSocket(PORT);
-                log("Servidor TCP en ejecucion: " + addr + ", Puerto " + serverSocket.getLocalPort());
-
-                while (true) {
-                    Socket clientSocket = serverSocket.accept();
-                    new Thread(() -> manejarCliente(clientSocket)).start();
-                }
-            } catch (IOException ex) {
-                log("Error en el servidor: " + ex.getMessage());
-            }
-        }).start();
     }
 
     public static void main(String args[]) {
