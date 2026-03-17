@@ -109,6 +109,16 @@ public class PrincipalSrv extends javax.swing.JFrame {
         }
     }
 
+    private void broadcastArchivo(String remitente, String nombreArchivo, long tamanoBytes, String base64Data) {
+        for (Map.Entry<String, PrintWriter> entry : clientesConectados.entrySet()) {
+            if (!entry.getKey().equals(remitente)) {
+                entry.getValue().println(
+                        "FILE_RECV:" + remitente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data
+                );
+            }
+        }
+    }
+
     private String validarArchivo(String nombreArchivo, long tamanoBytes) {
         String nombreLower = nombreArchivo.toLowerCase();
         for (String ext : extensionesProhividas ) {
@@ -189,22 +199,19 @@ public class PrincipalSrv extends javax.swing.JFrame {
                         continue;
                     }
 
-                    if (!clientesConectados.containsKey(destinatario)) {
-                        enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
-                        continue;
+                    if (destinatario.equals("TODOS")) {
+                        broadcastArchivo(nombreCliente, nombreArchivo, tamanoBytes, base64Data);
+                        enviarA(nombreCliente, "ARCHIVO:TODOS:" + nombreArchivo + ":" + tamanoBytes);
+                        log("[ARCHIVO] " + nombreCliente + " -> [TODOS] | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
+                    } else {
+                        if (!clientesConectados.containsKey(destinatario)) {
+                            enviarA(nombreCliente, "ERROR:Cliente '" + destinatario + "' no encontrado");
+                            continue;
+                        }
+                        enviarA(destinatario, "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
+                        enviarA(nombreCliente, "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
+                        log("[ARCHIVO] " + nombreCliente + " -> " + destinatario + " | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
                     }
-
-                    // Reenviar al destinatario
-                    // Formato que recibe el destinatario: FILE_RECV:remitente:nombreArchivo:tamanoBytes:base64Data
-                    enviarA(destinatario,
-                            "FILE_RECV:" + nombreCliente + ":" + nombreArchivo + ":" + tamanoBytes + ":" + base64Data);
-
-                    // Confirmar al remitente
-                    enviarA(nombreCliente,
-                            "FILE_OK:" + destinatario + ":" + nombreArchivo + ":" + tamanoBytes);
-
-                    log("[ARCHIVO] " + nombreCliente + " -> " + destinatario
-                            + " | " + nombreArchivo + " | " + (tamanoBytes / 1024) + " KB");
 
 
                 } else if (linea.startsWith("TODOS:")) {

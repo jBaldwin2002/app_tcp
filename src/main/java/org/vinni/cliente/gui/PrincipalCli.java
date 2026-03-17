@@ -181,7 +181,7 @@ public class PrincipalCli extends javax.swing.JFrame {
 
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this,
-                    "No se pudo conectar al servidor: " + e.getMessage());
+                    "No se pudo conectar al servidor");
         }
     }
 
@@ -269,12 +269,6 @@ public class PrincipalCli extends javax.swing.JFrame {
 
         String destinatario = (String) destinatarioCmb.getSelectedItem();
 
-        if (destinatario.equals("TODOS")) {
-            JOptionPane.showMessageDialog(this,
-                    "El envio de archivos no esta disponible para 'TODOS'.\nSelecciona un destinatario especifico.",
-                    "Destinatario invalido", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
 
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Seleccionar archivo para enviar a " + destinatario);
