@@ -37,6 +37,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
         this.setTitle("Servidor ...");
 
         bAccion = new javax.swing.JButton();
+        bSimularCaida = new javax.swing.JButton();
         jLabel1 = new javax.swing.JLabel();
         mensajesTxt = new JTextArea();
         jScrollPane1 = new javax.swing.JScrollPane();
@@ -44,17 +45,24 @@ public class PrincipalSrv extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         getContentPane().setLayout(null);
 
-        bAccion.setFont(new java.awt.Font("Segoe UI", 1, 14));
+        bAccion.setFont(new java.awt.Font("Segoe UI", 1, 12));
         bAccion.setText("INICIAR SERVIDOR");
         bAccion.addActionListener(evt -> toggleServidor());
         getContentPane().add(bAccion);
-        bAccion.setBounds(100, 90, 250, 40);
+        bAccion.setBounds(30, 90, 180, 40);
+
+        bSimularCaida.setFont(new java.awt.Font("Segoe UI", 1, 12));
+        bSimularCaida.setText("CAIDA Y REINICIO");
+        bSimularCaida.setEnabled(false);
+        bSimularCaida.addActionListener(evt -> apagarYAutoReiniciar());
+        getContentPane().add(bSimularCaida);
+        bSimularCaida.setBounds(230, 90, 220, 40);
 
         jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
         jLabel1.setText("SERVIDOR TCP : HOEL");
         getContentPane().add(jLabel1);
-        jLabel1.setBounds(150, 10, 160, 17);
+        jLabel1.setBounds(150, 10, 165, 17);
 
         mensajesTxt.setColumns(25);
         mensajesTxt.setRows(5);
@@ -62,9 +70,9 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
         jScrollPane1.setViewportView(mensajesTxt);
         getContentPane().add(jScrollPane1);
-        jScrollPane1.setBounds(20, 160, 410, 100);
+        jScrollPane1.setBounds(20, 160, 440, 70);
 
-        setSize(new java.awt.Dimension(491, 310));
+        setSize(new java.awt.Dimension(491, 290));
         setLocationRelativeTo(null);
     }
 
@@ -80,12 +88,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
         servidorCorriendo = true;
         bAccion.setText("DETENER SERVIDOR");
         bAccion.setForeground(java.awt.Color.RED);
+        bSimularCaida.setEnabled(true);
 
         new Thread(() -> {
             try {
                 serverSocket = new ServerSocket(PORT);
                 InetAddress addr = InetAddress.getLocalHost();
-                log("Servidor TCP en ejecución: " + addr + ", Puerto " + serverSocket.getLocalPort());
+                log("Servidor TCP en ejecucion: " + addr + ", Puerto " + serverSocket.getLocalPort());
 
                 while (servidorCorriendo) {
                     Socket clientSocket = serverSocket.accept();
@@ -98,7 +107,9 @@ public class PrincipalSrv extends javax.swing.JFrame {
                     log("--> El servidor ha sido detenido manualmente.");
                 }
             } finally {
-                detenerServidorManual();
+                if (servidorCorriendo) {
+                    detenerServidorManual();
+                }
             }
         }).start();
     }
@@ -113,7 +124,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             }
         } catch (IOException ignored) {}
 
-        // 2. Desconectar a todos los clientes a la fuerza para que activen su política de reconexión
+        // 2. Desconectar a todos los clientes a la fuerza
         for (Socket socket : socketsConectados.values()) {
             try {
                 socket.close();
@@ -126,12 +137,61 @@ public class PrincipalSrv extends javax.swing.JFrame {
         SwingUtilities.invokeLater(() -> {
             bAccion.setText("INICIAR SERVIDOR");
             bAccion.setForeground(java.awt.Color.BLACK);
+            bAccion.setEnabled(true);
+            bSimularCaida.setEnabled(false);
         });
 
         log("Servidor apagado. Todas las conexiones fueron cerradas.");
     }
 
-    // ... (El resto de los métodos enviarA, enviarListaClientes, notificarCambioClientes, broadcast, broadcastArchivo, validarArchivo se mantienen exactamente igual que en la versión anterior) ...
+    private void apagarYAutoReiniciar() {
+        servidorCorriendo = false;
+
+        // Bloqueamos la interfaz mientras dura el reinicio
+        bAccion.setEnabled(false);
+        bSimularCaida.setEnabled(false);
+        bSimularCaida.setText("REINICIANDO...");
+        bSimularCaida.setForeground(java.awt.Color.GRAY);
+
+        // Cerrar conexiones a la fuerza
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (IOException ignored) {}
+
+        for (Socket socket : socketsConectados.values()) {
+            try { socket.close(); } catch (IOException ignored) {}
+        }
+
+        socketsConectados.clear();
+        clientesConectados.clear();
+
+        log("--> [SIMULACION] Servidor caido. Los clientes intentaran reconectar...");
+
+        // Iniciar hilo de auto-reinicio (espera 5 segundos)
+        new Thread(() -> {
+            try {
+                for (int i = 5; i > 0; i--) {
+                    final int seg = i;
+                    SwingUtilities.invokeLater(() -> log("Auto-reinicio en " + seg + "s..."));
+                    Thread.sleep(1000);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            // Al terminar la cuenta, restauramos el botón y volvemos a iniciar
+            SwingUtilities.invokeLater(() -> {
+                bSimularCaida.setText("SIMULAR CAIDA Y REINICIO");
+                bSimularCaida.setForeground(java.awt.Color.BLACK);
+                bAccion.setEnabled(true);
+                log("--> Levantando servidor de nuevo...");
+                iniciarServidor();
+            });
+        }).start();
+    }
+
 
     private void enviarA(String destinatario, String mensaje) {
         PrintWriter writer = clientesConectados.get(destinatario);
@@ -295,7 +355,10 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     private javax.swing.JButton bAccion;
+    private javax.swing.JButton bSimularCaida;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JTextArea mensajesTxt;
     private javax.swing.JScrollPane jScrollPane1;
 }
+//hola
+//Prueba
