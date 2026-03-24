@@ -160,9 +160,11 @@ public class PrincipalCli extends javax.swing.JFrame {
             int intentoActual = 1;
             boolean conexionExitosa = false;
 
-            while (intentoActual <= MAX_REINTENTOS && !conexionExitosa) {
+            while (!conexionExitosa) {
                 try {
-                    log("Intento " + intentoActual + " de " + MAX_REINTENTOS + " ");
+                    if (intentoActual <= MAX_REINTENTOS) {
+                        log("Intento " + intentoActual + " de " + MAX_REINTENTOS + "...");
+                    }
 
                     socket = new Socket();
                     // Timeout de conexión aquí
@@ -176,6 +178,11 @@ public class PrincipalCli extends javax.swing.JFrame {
 
                     if (respuesta != null && respuesta.startsWith("OK:")) {
                         conexionExitosa = true;
+
+                        if (intentoActual > MAX_REINTENTOS) {
+                            log("Conexion restablecida exitosamente");
+                        }
+
                         log(respuesta.substring(3));
                         cambiarEstadoUI(true);
                         iniciarHiloEscucha(); // Arrancar escucha de mensajes
@@ -191,23 +198,25 @@ public class PrincipalCli extends javax.swing.JFrame {
                     }
 
                 } catch (IOException e) {
-                    log("Fallo intento " + intentoActual + ": Servidor no disponible.");
+                    if (intentoActual <= MAX_REINTENTOS) {
+                        log("Fallo intento " + intentoActual + ": Servidor no disponible");
 
-                    if (intentoActual < MAX_REINTENTOS) {
-                        try {
-                            log("Esperando " + (TIEMPO_REINTENTO_MS / 1000) + " segundos antes de reintentar...");
-                            Thread.sleep(TIEMPO_REINTENTO_MS);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
+
+                        if (intentoActual == MAX_REINTENTOS) {
+                            log("Intentando reconexion");
+                        } else {
+                            log("Esperando " + (TIEMPO_REINTENTO_MS / 1000) + " segundos");
                         }
+                    }
+
+                    try {
+                        Thread.sleep(TIEMPO_REINTENTO_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return; // Salir si interrumpen el hilo
                     }
                 }
                 intentoActual++;
-            }
-
-            if (!conexionExitosa) {
-                log("--> Reintentos agotados: No se pudo conectar tras " + MAX_REINTENTOS + " intentos.");
-                SwingUtilities.invokeLater(() -> bConectar.setEnabled(true));
             }
         }).start();
     }
@@ -223,11 +232,11 @@ public class PrincipalCli extends javax.swing.JFrame {
                 throw new IOException("El servidor cerro la conexion intencionalmente (EOF).");
 
             } catch (IOException ex) {
-                log("¡Conexion perdida con el servidor!");
+                log("Conexion perdida con el servidor");
                 cambiarEstadoUI(false);
 
                 // Disparar reconexión automática
-                log("--> Iniciando politica de RECONEXION automatica...");
+                log("--> Iniciando reconexion automatica...");
                 ejecutarPoliticaDeReintentos();
             }
         }).start();
@@ -347,5 +356,3 @@ public class PrincipalCli extends javax.swing.JFrame {
     private javax.swing.JTextField nombreTxt;
     private javax.swing.JComboBox<String> destinatarioCmb;
 }
-//ds
-//abstr

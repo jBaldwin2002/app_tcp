@@ -360,5 +360,3 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private javax.swing.JTextArea mensajesTxt;
     private javax.swing.JScrollPane jScrollPane1;
 }
-//hola
-//Prueba
