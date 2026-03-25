@@ -1,10 +1,7 @@
 package org.vinni.servidor.gui;
 
 import javax.swing.*;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -20,7 +17,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private ServerSocket serverSocket;
     private boolean servidorCorriendo = false;
 
-    // Lista de clientes conectados (Guardamos el Socket entero para poder cerrarlo forzosamente)
     private final Map<String, Socket> socketsConectados = new ConcurrentHashMap<>();
     private final Map<String, PrintWriter> clientesConectados = new ConcurrentHashMap<>();
 
@@ -28,8 +24,12 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private static final long tamanhoMin = 1024;
     private static final long tamanhoMax = 1024 * 1024 * 5;
 
+    // bandera para comunicarle al Watchdog que fue parada voluntaria
+    private static final String FLAG_PARADA_VOLUNTARIA = "servidor.stop";
+
     public PrincipalSrv() {
         initComponents();
+        iniciarServidor();
     }
 
     @SuppressWarnings("unchecked")
@@ -37,7 +37,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
         this.setTitle("Servidor ...");
 
         bAccion = new javax.swing.JButton();
-        bSimularCaida = new javax.swing.JButton();
         jLabel1 = new javax.swing.JLabel();
         mensajesTxt = new JTextArea();
         jScrollPane1 = new javax.swing.JScrollPane();
@@ -49,14 +48,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
         bAccion.setText("INICIAR SERVIDOR");
         bAccion.addActionListener(evt -> toggleServidor());
         getContentPane().add(bAccion);
-        bAccion.setBounds(30, 90, 180, 40);
-
-        bSimularCaida.setFont(new java.awt.Font("Segoe UI", 1, 12));
-        bSimularCaida.setText("CAIDA Y REINICIO");
-        bSimularCaida.setEnabled(false);
-        bSimularCaida.addActionListener(evt -> apagarYAutoReiniciar());
-        getContentPane().add(bSimularCaida);
-        bSimularCaida.setBounds(230, 90, 220, 40);
+        bAccion.setBounds(135, 90, 180, 40);
 
         jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
@@ -88,7 +80,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
         servidorCorriendo = true;
         bAccion.setText("DETENER SERVIDOR");
         bAccion.setForeground(java.awt.Color.RED);
-        bSimularCaida.setEnabled(true);
 
         new Thread(() -> {
             try {
@@ -104,7 +95,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 if (servidorCorriendo) {
                     log("[ERROR] Fallo en el servidor: " + ex.getMessage());
                 } else {
-                    log("--> El servidor ha sido detenido manualmente.");
+                    log("--> El servidor ha sido detenido.");
                 }
             } finally {
                 if (servidorCorriendo) {
@@ -115,45 +106,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     private void detenerServidorManual() {
-        servidorCorriendo = false;
-
-        // 1. Cerrar el ServerSocket para no aceptar más conexiones
+        // Crear bandera para que el Watchdog NO relance el servidor
         try {
-            if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close();
-            }
+            new File(FLAG_PARADA_VOLUNTARIA).createNewFile();
         } catch (IOException ignored) {}
 
-        // 2. Desconectar a todos los clientes a la fuerza
-        for (Socket socket : socketsConectados.values()) {
-            try {
-                socket.close();
-            } catch (IOException ignored) {}
-        }
-
-        socketsConectados.clear();
-        clientesConectados.clear();
-
-        SwingUtilities.invokeLater(() -> {
-            bAccion.setText("INICIAR SERVIDOR");
-            bAccion.setForeground(java.awt.Color.BLACK);
-            bAccion.setEnabled(true);
-            bSimularCaida.setEnabled(false);
-        });
-
-        log("Servidor apagado. Todas las conexiones fueron cerradas.");
-    }
-
-    private void apagarYAutoReiniciar() {
         servidorCorriendo = false;
 
-        // Bloqueamos la interfaz mientras dura el reinicio
-        bAccion.setEnabled(false);
-        bSimularCaida.setEnabled(false);
-        bSimularCaida.setText("REINICIANDO...");
-        bSimularCaida.setForeground(java.awt.Color.GRAY);
-
-        // Cerrar conexiones a la fuerza
         try {
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
@@ -167,31 +126,14 @@ public class PrincipalSrv extends javax.swing.JFrame {
         socketsConectados.clear();
         clientesConectados.clear();
 
-        log("--> [SIMULACION] Servidor caido. Los clientes intentaran reconectar...");
+        SwingUtilities.invokeLater(() -> {
+            bAccion.setText("INICIAR SERVIDOR");
+            bAccion.setForeground(java.awt.Color.BLACK);
+            bAccion.setEnabled(true);
+        });
 
-        // Iniciar hilo de auto-reinicio (espera 5 segundos)
-        new Thread(() -> {
-            try {
-                for (int i = 5; i > 0; i--) {
-                    final int seg = i;
-                    SwingUtilities.invokeLater(() -> log("Auto-reinicio en " + seg + "s..."));
-                    Thread.sleep(1000);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-
-            // Al terminar la cuenta, restauramos el botón y volvemos a iniciar
-            SwingUtilities.invokeLater(() -> {
-                bSimularCaida.setText("SIMULAR CAIDA Y REINICIO");
-                bSimularCaida.setForeground(java.awt.Color.BLACK);
-                bAccion.setEnabled(true);
-                log("--> Levantando servidor de nuevo...");
-                iniciarServidor();
-            });
-        }).start();
+        log("Servidor apagado voluntariamente. Watchdog no reiniciara.");
     }
-
 
     private void enviarA(String destinatario, String mensaje) {
         PrintWriter writer = clientesConectados.get(destinatario);
@@ -236,7 +178,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
     private String validarArchivo(String nombreArchivo, long tamanoBytes) {
         String nombreLower = nombreArchivo.toLowerCase();
-        for (String ext : extensionesProhividas ) {
+        for (String ext : extensionesProhividas) {
             if (nombreLower.endsWith(ext)) {
                 return "Archivo rechazado: extension '" + ext + "' no permitida";
             }
@@ -273,7 +215,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
             }
 
             clientesConectados.put(nombreCliente, out);
-            socketsConectados.put(nombreCliente, clientSocket); // se guarda el socket
+            socketsConectados.put(nombreCliente, clientSocket);
             out.println("OK:Conectado como " + nombreCliente);
             log("Cliente conectado: " + nombreCliente);
             notificarCambioClientes();
@@ -332,7 +274,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 }
             }
         } catch (Exception e) {
-            // El error salta aquí si el cliente se desconecta abruptamente o si el servidor cierra el socket.
+            // Desconexión abrupta o socket cerrado por el servidor
         } finally {
             if (nombreCliente != null) {
                 clientesConectados.remove(nombreCliente);
@@ -355,7 +297,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     private javax.swing.JButton bAccion;
-    private javax.swing.JButton bSimularCaida;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JTextArea mensajesTxt;
     private javax.swing.JScrollPane jScrollPane1;
