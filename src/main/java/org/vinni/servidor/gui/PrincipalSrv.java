@@ -13,7 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class PrincipalSrv extends javax.swing.JFrame {
 
-    private final int PORT = 12345;
+    private int PORT = 12345;
+    private static final int[] PUERTOS_DISPONIBLES = {12346, 12347, 12348};
+
     private ServerSocket serverSocket;
     private boolean servidorCorriendo = false;
 
@@ -23,19 +25,30 @@ public class PrincipalSrv extends javax.swing.JFrame {
     private static final String[] extensionesProhividas = {".exe", ".bat"};
     private static final long tamanhoMin = 1024;
     private static final long tamanhoMax = 1024 * 1024 * 5;
-
-    // bandera para comunicarle al Watchdog que fue parada voluntaria
     private static final String FLAG_PARADA_VOLUNTARIA = "servidor.stop";
 
     public PrincipalSrv() {
+        for (int p : PUERTOS_DISPONIBLES) {
+            try (ServerSocket prueba = new ServerSocket(p)) {
+                this.PORT = p;
+                break;
+            } catch (IOException e) {
+                // El puerto esta ocupado por otro servidor, intentamos con el siguiente
+            }
+        }
+
+        if (this.PORT == -1) {
+            JOptionPane.showMessageDialog(null, "No hay puertos disponibles (12346, 12347 o 12348 ya estan en uso).");
+            System.exit(0);
+        }
+
         initComponents();
+        this.setTitle("Servidor Activo (Puerto: " + PORT + ")");
         iniciarServidor();
     }
 
     @SuppressWarnings("unchecked")
     private void initComponents() {
-        this.setTitle("Servidor ...");
-
         bAccion = new javax.swing.JButton();
         jLabel1 = new javax.swing.JLabel();
         mensajesTxt = new JTextArea();
@@ -274,7 +287,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 }
             }
         } catch (Exception e) {
-            // Desconexión abrupta o socket cerrado por el servidor
+            // Desconexion
         } finally {
             if (nombreCliente != null) {
                 clientesConectados.remove(nombreCliente);
