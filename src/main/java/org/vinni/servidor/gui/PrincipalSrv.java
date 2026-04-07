@@ -13,8 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class PrincipalSrv extends javax.swing.JFrame {
 
-    private int PORT = 12345;
-    private static final int[] PUERTOS_DISPONIBLES = {12346, 12347, 12348};
+    private int PORT = -1;
+    private static final int[] PUERTOS_DISPONIBLES = {12346, 12347, 12348, 12349};
 
     private ServerSocket serverSocket;
     private boolean servidorCorriendo = false;
@@ -33,12 +33,13 @@ public class PrincipalSrv extends javax.swing.JFrame {
                 this.PORT = p;
                 break;
             } catch (IOException e) {
-                // El puerto esta ocupado por otro servidor, intentamos con el siguiente
+                // Puerto ocupado, intentar el siguiente
             }
         }
 
         if (this.PORT == -1) {
-            JOptionPane.showMessageDialog(null, "No hay puertos disponibles (12346, 12347 o 12348 ya estan en uso).");
+            JOptionPane.showMessageDialog(null,
+                    "No hay puertos disponibles (12346, 12347, 12348 o 12349 ya estan en uso).");
             System.exit(0);
         }
 
@@ -65,7 +66,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
 
         jLabel1.setFont(new java.awt.Font("Tahoma", 1, 14));
         jLabel1.setForeground(new java.awt.Color(204, 0, 0));
-        jLabel1.setText("SERVIDOR TCP : HOEL");
+        jLabel1.setText("SERVIDOR TCP");
         getContentPane().add(jLabel1);
         jLabel1.setBounds(150, 10, 165, 17);
 
@@ -119,7 +120,6 @@ public class PrincipalSrv extends javax.swing.JFrame {
     }
 
     private void detenerServidorManual() {
-        // Crear bandera para que el Watchdog NO relance el servidor
         try {
             new File(FLAG_PARADA_VOLUNTARIA).createNewFile();
         } catch (IOException ignored) {}
@@ -305,7 +305,7 @@ public class PrincipalSrv extends javax.swing.JFrame {
         SwingUtilities.invokeLater(() -> mensajesTxt.append(mensaje + "\n"));
     }
 
-    public static void main(String args[]) {
+    public static void main(String[] args) {
         java.awt.EventQueue.invokeLater(() -> new PrincipalSrv().setVisible(true));
     }
 
